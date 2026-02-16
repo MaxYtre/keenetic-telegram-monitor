@@ -1,0 +1,171 @@
+#!/bin/sh
+# Init.d script for device monitoring
+# Install to /opt/etc/init.d/S99monitor
+
+ENABLED=yes
+PROCS=monitor-devices
+ARGS=""
+PREARGS=""
+DESC=$PROCS
+PIDFILE="/var/run/monitor-devices.pid"
+LOG_DIR="/opt/var/log"
+LOG_FILE="${LOG_DIR}/monitor-devices.log"
+PATH=/opt/sbin:/opt/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+# Date format for logs: dd-mm-yy HH:MM
+LOG_DATE() {
+    date +%d-%m-%y\ %H:%M
+}
+
+# Create log directory if not exists
+mkdir -p "$LOG_DIR"
+
+# Log rotation (builtin, no logrotate)
+rotate_log() {
+    if [ -f "$LOG_FILE" ]; then
+        # Use wc -c instead of stat -c%s for BusyBox compatibility
+        SIZE=$(wc -c < "$LOG_FILE" 2>/dev/null || echo 0)
+        # Max size 10KB
+        if [ "$SIZE" -gt 10240 ]; then
+            tail -n 100 "$LOG_FILE" > "${LOG_FILE}.tmp" && mv "${LOG_FILE}.tmp" "$LOG_FILE"
+            echo "$(LOG_DATE): Log rotated" >> "$LOG_FILE"
+        fi
+    fi
+}
+
+# Logging function
+log_msg() {
+    rotate_log
+    echo "$(LOG_DATE): $1" >> "$LOG_FILE"
+}
+
+# Start monitor-devices.sh in background
+start() {
+    log_msg "Starting monitor-devices.sh..."
+    
+    # Check if already running
+    if [ -f "$PIDFILE" ]; then
+        OLD_PID=$(cat "$PIDFILE")
+        if kill -0 "$OLD_PID" 2>/dev/null; then
+            echo "Monitor already running with PID $OLD_PID"
+            return 1
+        else
+            rm -f "$PIDFILE"
+        fi
+    fi
+    
+    # Use nohup to start correctly and save PID
+    nohup sh -c '
+        PID=$$
+        echo $PID > /var/run/monitor-devices.pid
+        while true; do
+            /opt/bin/monitor-devices.sh
+            sleep 60
+        done
+    ' > /dev/null 2>&1 &
+    
+    # Wait for start
+    sleep 1
+    
+    # Check if process started
+    if [ -f "$PIDFILE" ]; then
+        NEW_PID=$(cat "$PIDFILE")
+        if kill -0 "$NEW_PID" 2>/dev/null; then
+            log_msg "Monitor started with PID $NEW_PID"
+            echo "Monitor started with PID $NEW_PID"
+            return 0
+        fi
+    fi
+    
+    # Fallback: find process
+    sleep 1
+    NEW_PID=$(pgrep -f "monitor-devices.sh" 2>/dev/null | head -1)
+    if [ -n "$NEW_PID" ]; then
+        echo "$NEW_PID" > "$PIDFILE"
+        log_msg "Monitor started (fallback) with PID $NEW_PID"
+        echo "Monitor started with PID $NEW_PID"
+        return 0
+    fi
+    
+    echo "Failed to start monitor"
+    return 1
+}
+
+# Stop monitor
+stop() {
+    echo "Stopping monitor-devices.sh..."
+    log_msg "Stopping monitor..."
+    
+    if [ -f "$PIDFILE" ]; then
+        PID=$(cat "$PIDFILE")
+        if kill -0 "$PID" 2>/dev/null; then
+            kill "$PID" 2>/dev/null
+            # Wait for graceful shutdown
+            sleep 2
+            # Force kill if still running
+            if kill -0 "$PID" 2>/dev/null; then
+                kill -9 "$PID" 2>/dev/null
+            fi
+            rm -f "$PIDFILE"
+            log_msg "Monitor stopped"
+            echo "Monitor stopped"
+        else
+            rm -f "$PIDFILE"
+            log_msg "Monitor was not running"
+            echo "Monitor was not running"
+        fi
+    else
+        # Fallback: find and kill by name
+        PIDS=$(pgrep -f "monitor-devices.sh" 2>/dev/null)
+        if [ -n "$PIDS" ]; then
+            for p in $PIDS; do
+                kill -9 "$p" 2>/dev/null
+            done
+            log_msg "Monitor stopped (fallback by name)"
+            echo "Monitor stopped (fallback)"
+        else
+            echo "Monitor not running"
+        fi
+    fi
+}
+
+# Handle command line arguments
+case "$1" in
+    start)
+        start
+        ;;
+    stop)
+        stop
+        ;;
+    restart)
+        stop
+        sleep 2
+        start
+        ;;
+    status)
+        if [ -f "$PIDFILE" ]; then
+            PID=$(cat "$PIDFILE")
+            if kill -0 "$PID" 2>/dev/null; then
+                echo "Monitor running with PID $PID"
+            else
+                echo "Monitor not running (stale PID file)"
+                rm -f "$PIDFILE"
+            fi
+        else
+            echo "Monitor not running"
+        fi
+        ;;
+    log)
+        if [ -f "$LOG_FILE" ]; then
+            tail -n 50 "$LOG_FILE"
+        else
+            echo "No log file found"
+        fi
+        ;;
+    *)
+        echo "Usage: $0 {start|stop|restart|status|log}"
+        exit 1
+        ;;
+esac
+
+exit 0
