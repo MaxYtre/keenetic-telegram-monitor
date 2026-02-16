@@ -7,7 +7,6 @@
 - `notify-telegram.sh` - скрипт отправки уведомлений
 - `devices.conf` - конфигурация устройств (MAC -> имя)
 - `telegram.conf` - конфигурация Telegram бота
-- `plans/improvement-plan.md` - подробный план улучшений
 
 ## Предварительные требования
 
