@@ -71,10 +71,12 @@ get_device_name() {
     fi
 }
 
-# Check device status
+# Check device status and return online/offline
 check_device() {
     local mac="$1"
     local flag_file="${FLAG_DIR}/online-${mac}"
+    local dev_name
+    dev_name=$(get_device_name "$mac")
     
     # Check if MAC is in neighbour table (any active state except failed)
     # States: reachable, stale, delay, probe - all mean device is physically present
@@ -83,22 +85,20 @@ check_device() {
         # Device is online
         if [ ! -f "$flag_file" ]; then
             # Device appeared (was offline)
-            local dev_name
-            dev_name=$(get_device_name "$mac")
             log_msg "Device connected: $dev_name ($mac)"
             /opt/bin/notify-telegram.sh "connect" "$dev_name"
             touch "$flag_file"
         fi
+        echo "online"
     else
         # Device is offline
         if [ -f "$flag_file" ]; then
             # Device disappeared (was online)
-            local dev_name
-            dev_name=$(get_device_name "$mac")
             log_msg "Device disconnected: $dev_name ($mac)"
             /opt/bin/notify-telegram.sh "disconnect" "$dev_name"
             rm "$flag_file"
         fi
+        echo "offline"
     fi
 }
 
@@ -108,11 +108,27 @@ main() {
     local neigh
     neigh=$(ip neigh show nud all 2>/dev/null | grep -v 'nud failed')
     
-    # Check each device from config
+    # Log header
+    log_msg "Device Status:"
+    
+    # Check each device from config and log status
     for entry in $DEVICES; do
         local mac="${entry%%=*}"
-        check_device "$mac"
+        local status
+        status=$(check_device "$mac")
+        local dev_name
+        dev_name=$(get_device_name "$mac")
+        
+        # Log each device on separate line
+        if [ "$status" = "online" ]; then
+            log_msg "${dev_name} - ONLINE"
+        else
+            log_msg "${dev_name} - OFFLINE"
+        fi
     done
+    
+    # Log separator
+    log_msg "======================================"
 }
 
 # Run
