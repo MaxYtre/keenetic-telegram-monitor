@@ -78,10 +78,9 @@ check_device() {
     local dev_name
     dev_name=$(get_device_name "$mac")
     
-    # Check if MAC is in neighbour table (any active state except failed)
-    # States: reachable, stale, delay, probe - all mean device is physically present
-    # Only 'failed' means unreachable
-    if ip neigh show nud all 2>/dev/null | grep -qi "$mac" && ! ip neigh show nud failed 2>/dev/null | grep -qi "$mac"; then
+    # Get only IPv4 neighbour entries first (lines starting with digit)
+    # Then search for MAC in IPv4 entries only
+    if ip neigh show 2>/dev/null | grep -E "^[0-9]" | grep -qi "$mac"; then
         # Device is online
         if [ ! -f "$flag_file" ]; then
             # Device appeared (was offline)
@@ -104,9 +103,9 @@ check_device() {
 
 # Main monitoring function
 main() {
-    # Get neighbour table (all active states except failed)
+    # Get all neighbour entries
     local neigh
-    neigh=$(ip neigh show nud all 2>/dev/null | grep -v 'nud failed')
+    neigh=$(ip neigh show 2>/dev/null)
     
     # Log header
     log_msg "Device Status:"
