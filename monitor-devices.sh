@@ -19,13 +19,16 @@ fi
 FLAG_DIR="/tmp/monitor-devices"
 mkdir -p "$FLAG_DIR"
 
+# Delay before sending disconnect notification (in seconds)
+OFFLINE_DELAY=15
+
 # Log directory
 LOG_DIR="/opt/var/log"
 mkdir -p "$LOG_DIR"
 LOG_FILE="${LOG_DIR}/monitor-devices.log"
 
 # Main function logging toggle (true/false)
-ENABLE_MAIN_LOGGING=true
+ENABLE_MAIN_LOGGING=false
 
 # Date format for logs: dd-mm-yy HH:MM
 LOG_DATE() {
@@ -74,10 +77,16 @@ get_device_name() {
     fi
 }
 
+# Get current timestamp in seconds
+get_timestamp() {
+    date +%s
+}
+
 # Check device status and return online/offline
 check_device() {
     local mac="$1"
     local flag_file="${FLAG_DIR}/online-${mac}"
+    local offline_start_file="${FLAG_DIR}/offline-start-${mac}"
     local dev_name
     dev_name=$(get_device_name "$mac")
     
@@ -85,6 +94,12 @@ check_device() {
     # Then search for MAC in IPv4 entries only
     if ip neigh show 2>/dev/null | grep -E "^[0-9]" | grep -qi "$mac"; then
         # Device is online
+        # Remove offline start file if exists (device returned)
+        if [ -f "$offline_start_file" ]; then
+            rm -f "$offline_start_file"
+            log_msg "Device returned: $dev_name ($mac)"
+        fi
+        
         if [ ! -f "$flag_file" ]; then
             # Device appeared (was offline)
             log_msg "Device connected: $dev_name ($mac)"
@@ -96,9 +111,30 @@ check_device() {
         # Device is offline
         if [ -f "$flag_file" ]; then
             # Device disappeared (was online)
-            log_msg "Device disconnected: $dev_name ($mac)"
-            /opt/bin/notify-telegram.sh "disconnect" "$dev_name"
-            rm "$flag_file"
+            # Check if we already started offline timer
+            if [ ! -f "$offline_start_file" ]; then
+                # First time offline - start timer
+                echo "$(get_timestamp)" > "$offline_start_file"
+                log_msg "Device lost, waiting ${OFFLINE_DELAY}s: $dev_name ($mac)"
+            else
+                # Check if delay has passed
+                local start_time
+                start_time=$(cat "$offline_start_file" 2>/dev/null)
+                local current_time
+                current_time=$(get_timestamp)
+                local elapsed=$((current_time - start_time))
+                
+                if [ "$elapsed" -ge "$OFFLINE_DELAY" ]; then
+                    # Delay passed - send disconnect notification
+                    log_msg "Device disconnected: $dev_name ($mac)"
+                    /opt/bin/notify-telegram.sh "disconnect" "$dev_name"
+                    rm -f "$flag_file"
+                    rm -f "$offline_start_file"
+                else
+                    # Still waiting
+                    log_msg "Device still offline, ${OFFLINE_DELAY}s left: $dev_name ($mac)"
+                fi
+            fi
         fi
         echo "offline"
     fi
