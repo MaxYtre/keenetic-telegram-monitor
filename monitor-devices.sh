@@ -24,6 +24,9 @@ LOG_DIR="/opt/var/log"
 mkdir -p "$LOG_DIR"
 LOG_FILE="${LOG_DIR}/monitor-devices.log"
 
+# Main function logging toggle (true/false)
+ENABLE_MAIN_LOGGING=true
+
 # Date format for logs: dd-mm-yy HH:MM
 LOG_DATE() {
     date +%d-%m-%y\ %H:%M
@@ -108,7 +111,9 @@ main() {
     neigh=$(ip neigh show 2>/dev/null)
     
     # Log header
-    log_msg "Device Status:"
+    if [ "$ENABLE_MAIN_LOGGING" = true ]; then
+        log_msg "Device Status:"
+    fi
     
     # Check each device from config and log status
     for entry in $DEVICES; do
@@ -119,15 +124,19 @@ main() {
         dev_name=$(get_device_name "$mac")
         
         # Log each device on separate line
-        if [ "$status" = "online" ]; then
-            log_msg "${dev_name} - ONLINE"
-        else
-            log_msg "${dev_name} - OFFLINE"
+        if [ "$ENABLE_MAIN_LOGGING" = true ]; then
+            if [ "$status" = "online" ]; then
+                log_msg "${dev_name} - ONLINE"
+            else
+                log_msg "${dev_name} - OFFLINE"
+            fi
         fi
     done
     
     # Log separator
-    log_msg "======================================"
+    if [ "$ENABLE_MAIN_LOGGING" = true ]; then
+        log_msg "======================================"
+    fi
 }
 
 # Run
